@@ -1,55 +1,54 @@
 # freebuff2api
 
-Codebuff Freebuff 的 OpenAI-compatible API
+OpenAI-compatible API adapter for Codebuff Freebuff
 
-## 接口
+## Endpoints
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 - `GET /healthz`
 
-## 配置
+## Configuration
 
-### 获取 Token
+### Getting a Token
 
-无需安装 Freebuff / Codebuff CLI，可以直接打开公开页面自动获取 token：
+No need to install Freebuff / Codebuff CLI. You can directly access the public page to automatically obtain a token:
 
 ```text
 https://freebuff.071129.xyz/
 ```
 
-使用方式：
+Usage:
 
-1. 打开上面的地址
-2. 选择 Freebuff
-3. 点击“开始认证”，在跳转页面完成授权
-4. 回到页面复制展示的 token
-5. 将复制结果写入本项目 `.env`
+1. Open the URL above
+2. Select Freebuff
+3. Click "Start Authentication" and complete the authorization on the redirected page
+4. Return to the page and copy the displayed token
+5. Write the copied token to the `.env` file in this project
 
-示例：
+Example:
 
 ```dotenv
-FREEBUFF_TOKEN=你的 Freebuff Bearer token
+FREEBUFF_TOKEN=your Freebuff Bearer token
 ```
 
-多账号可用英文逗号分隔；并发请求会优先分配到空闲账号，避免单个
-Freebuff 账号的全局 active free session 被并发切模型请求互相覆盖：
+Multiple accounts can be separated with English commas. Concurrent requests will be prioritized to idle accounts, preventing the global active free session of a single Freebuff account from being overridden by concurrent model-switching requests:
 
 ```dotenv
 FREEBUFF_TOKEN=token-a,token-b,token-c
 ```
 
-复制 `.env.example` 为 `.env`，然后填写上游 token：
+Copy `.env.example` to `.env`, then fill in the upstream token:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-`.env` 示例：
+`.env` example:
 
 ```dotenv
-FREEBUFF_TOKEN=你的 Freebuff Bearer token
-FREEBUFF_API_KEY=本地 OpenAI API key，可留空
+FREEBUFF_TOKEN=your Freebuff Bearer token
+FREEBUFF_API_KEY=local OpenAI API key, can be left empty
 FREEBUFF_AD_PROVIDERS=gravity,zeroclick
 FREEBUFF_PROXY_ENABLED=false
 FREEBUFF_PROXY_URL=
@@ -61,16 +60,16 @@ FREEBUFF_HOST=0.0.0.0
 FREEBUFF_PORT=8000
 ```
 
-默认不启用代理，所有上游请求直连，且不会读取系统 `HTTP_PROXY` / `HTTPS_PROXY`。
+Proxy is disabled by default. All upstream requests are direct connections and do not read system `HTTP_PROXY` / `HTTPS_PROXY`.
 
-需要让所有上游请求经过代理时，在 `.env` 中开启：
+To route all upstream requests through a proxy, enable it in `.env`:
 
 ```dotenv
 FREEBUFF_PROXY_ENABLED=true
 FREEBUFF_PROXY_URL=http://127.0.0.1:7890
 ```
 
-支持 HTTP 和 SOCKS 代理，例如：
+Supports HTTP and SOCKS proxies, for example:
 
 ```dotenv
 FREEBUFF_PROXY_URL=http://127.0.0.1:7890
@@ -78,7 +77,7 @@ FREEBUFF_PROXY_URL=socks5://127.0.0.1:1080
 FREEBUFF_PROXY_URL=socks5h://127.0.0.1:1080
 ```
 
-当前内置 Freebuff 模型：
+Currently built-in Freebuff models:
 
 - `deepseek/deepseek-v4-flash`
 - `deepseek/deepseek-v4-pro`
@@ -91,7 +90,7 @@ FREEBUFF_PROXY_URL=socks5h://127.0.0.1:1080
 - `mimo/mimo-v2.5`
 - `mimo/mimo-v2.5-pro`
 
-调试空返回或上游异常时：
+When debugging empty returns or upstream exceptions:
 
 ```dotenv
 FREEBUFF_DEBUG=true
@@ -99,21 +98,21 @@ FREEBUFF_LOG_LEVEL=DEBUG
 FREEBUFF_LOG_BODY_CHARS=0
 ```
 
-## 运行
+## Running
 
 ```powershell
 uv sync
 uv run freebuff2api
 ```
 
-或：
+Or:
 
 ```powershell
 python -m pip install -e .
 python main.py
 ```
 
-## 调用示例
+## Usage Examples
 
 ```powershell
 curl http://127.0.0.1:8000/v1/chat/completions `
@@ -121,12 +120,12 @@ curl http://127.0.0.1:8000/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{
     "model": "deepseek/deepseek-v4-flash",
-    "messages": [{"role": "user", "content": "你好"}],
+    "messages": [{"role": "user", "content": "Hello"}],
     "stream": false
   }'
 ```
 
-流式：
+Streaming:
 
 ```powershell
 curl -N http://127.0.0.1:8000/v1/chat/completions `
@@ -134,11 +133,11 @@ curl -N http://127.0.0.1:8000/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{
     "model": "deepseek/deepseek-v4-flash",
-    "messages": [{"role": "user", "content": "写一个 Python 快排"}],
+    "messages": [{"role": "user", "content": "Write a Python quicksort"}],
     "stream": true
   }'
 ```
 
-## 感谢
+## Thanks
 
 > [FreeBuff](https://freebuff.com)
