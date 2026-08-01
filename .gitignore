@@ -11,3 +11,7 @@ wheels/
 
 # Local configuration
 .env
+
+# Local server logs
+server.log
+*.log

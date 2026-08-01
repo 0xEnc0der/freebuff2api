@@ -183,20 +183,26 @@ def _build_cli_messages(messages: Any) -> list[dict[str, Any]]:
     and rejects them with 403 free_mode_cli_required.
     """
     normalized = normalize_chat_messages(messages)
-    user_turns = [
-        item
-        for item in normalized
-        if item.get("role") == "user"
-        and not str(item.get("content") or "").startswith("<user_message>")
-    ]
 
     cli_messages: list[dict[str, Any]] = [
         _text_message("system", _load_buffy_system_prompt()),
         _text_message("system", _load_hermes_system_prompt()),
     ]
-    for item in user_turns:
-        text = _message_text(item.get("content"))
-        cli_messages.append(_text_message("user", f"<user_message>{text}</user_message>"))
+    for item in normalized:
+        role = item.get("role")
+        if role == "system":
+            # The client's own system prompt is replaced by the two above.
+            continue
+        if role == "user":
+            text = _message_text(item.get("content"))
+            if not text.startswith("<user_message>"):
+                text = f"<user_message>{text}</user_message>"
+            cli_messages.append(_text_message("user", text))
+        else:
+            # assistant (with tool_calls) and tool results MUST be forwarded,
+            # otherwise the upstream model never sees its own tool output and
+            # loops re-issuing the same call.
+            cli_messages.append(item)
     cli_messages.append(_text_message("user", _CLI_HELPER_MESSAGE))
     return cli_messages
 

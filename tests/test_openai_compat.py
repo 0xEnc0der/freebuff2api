@@ -230,6 +230,52 @@ class OpenAICompatTests(unittest.TestCase):
         self.assertNotIn("basher", names)
         self.assertNotIn("spawn_agents", names)
 
+    def test_build_upstream_payload_preserves_tool_call_history(self) -> None:
+        # Regression test: assistant tool_calls and tool results must be
+        # forwarded to the upstream model. Dropping them caused the model to
+        # loop re-issuing the same tool call (e.g. terminal 'sudo --version').
+        messages = [
+            {"role": "user", "content": "check the sudo version"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "terminal", "arguments": '{"command":"sudo --version"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "Sudo version 1.9.15"},
+            {"role": "user", "content": "great, now what?"},
+        ]
+        payload = build_upstream_payload(
+            {"model": "deepseek/deepseek-v4-flash", "messages": messages},
+            session=FreebuffSession(
+                instance_id="instance-1",
+                model="deepseek/deepseek-v4-flash",
+            ),
+            run_id="run-1",
+            client_id="client-1",
+        )
+
+        upstream_msgs = payload["messages"]
+        # [system Buffy, system Hermes, user, assistant(tool_calls), tool, user, helper]
+        self.assertEqual(len(upstream_msgs), 7)
+        roles = [m["role"] for m in upstream_msgs]
+        self.assertEqual(roles, ["system", "system", "user", "assistant", "tool", "user", "user"])
+
+        assistant_msg = upstream_msgs[3]
+        self.assertEqual(assistant_msg["tool_calls"][0]["function"]["name"], "terminal")
+        tool_msg = upstream_msgs[4]
+        self.assertEqual(tool_msg["tool_call_id"], "call_1")
+        self.assertIn("Sudo version", tool_msg["content"])
+        self.assertIn(
+            "<user_message>great, now what?</user_message>",
+            upstream_msgs[5]["content"][0]["text"],
+        )
+
     def test_accumulator_keeps_reasoning_content_separate(self) -> None:
         accumulator = CompletionAccumulator("deepseek/deepseek-v4-flash")
 
