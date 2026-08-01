@@ -20,20 +20,22 @@ _CLI_HELPER_MESSAGE = (
     "so at least implicitly."
 )
 
-_CLI_REMINDER_MESSAGE = (
-    "<system_reminder>You must spawn a code-reviewer-deepseek-flash to review any code changes "
-    "after you have implemented the changes and in parallel with typechecking or testing.\n"
-    "At the end of your turn, you must use the suggest_followups tool to suggest around 3 next "
-    "steps the user might want to take even if the user just asks a question.</system_reminder>"
-)
-
 
 def _load_buffy_system_prompt() -> str:
+    """Load the Buffy system prompt required by the upstream fingerprint.
+
+    The upstream 403s with free_mode_cli_required unless the first system
+    message is the real Codebuff "You are Buffy..." prompt, so this stays as
+    message[0]. The Hermes persona is appended as a second system message.
+    """
     path = _REFERENCE_DIR / "buffy_system_prompt.txt"
     try:
         prompt = path.read_text(encoding="utf-8")
     except OSError:
-        return "You are Buffy, the strategic coding assistant. You are the AI agent behind the product, Freebuff, a tool where users can chat with you to code with AI for free."
+        return (
+            "You are Buffy, the strategic coding assistant. You are the AI agent behind the "
+            "product, Freebuff, a tool where users can chat with you to code with AI for free."
+        )
     today = date.today().strftime("%B %-d, %Y") if hasattr(date.today(), "strftime") else date.today().isoformat()
     try:
         today = date.today().strftime("%B %-d, %Y")
@@ -42,6 +44,19 @@ def _load_buffy_system_prompt() -> str:
     import re
 
     prompt = re.sub(r"Current date: [^\n]+", f"Current date: {today}.", prompt, count=1)
+    return prompt
+
+
+def _load_hermes_system_prompt() -> str:
+    """Load the Hermes Agent persona prompt (appended after the Buffy prompt)."""
+    path = _REFERENCE_DIR / "hermes_system_prompt.txt"
+    try:
+        prompt = path.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "You are Hermes Agent, an intelligent AI assistant created by Nous Research. "
+            "You are helpful, knowledgeable, and direct."
+        )
     return prompt
 
 
@@ -171,10 +186,9 @@ def _build_cli_messages(messages: Any) -> list[dict[str, Any]]:
     """Build the message array the way the Freebuff CLI does.
 
     The CLI sends:
-      1. the full "You are Buffy..." system prompt (with current date),
+      1. a system prompt (Hermes Agent persona) with the current date,
       2. each user message wrapped in <user_message>...</user_message>,
-      3. a fixed "Act as a helpful assistant..." user instruction,
-      4. a fixed <system_reminder> user message.
+      3. a fixed "Act as a helpful assistant..." user instruction.
     The upstream now fingerprints requests that omit the CLI's system prompt
     and rejects them with 403 free_mode_cli_required.
     """
@@ -187,13 +201,13 @@ def _build_cli_messages(messages: Any) -> list[dict[str, Any]]:
     ]
 
     cli_messages: list[dict[str, Any]] = [
-        _text_message("system", _load_buffy_system_prompt())
+        _text_message("system", _load_buffy_system_prompt()),
+        _text_message("system", _load_hermes_system_prompt()),
     ]
     for item in user_turns:
         text = _message_text(item.get("content"))
         cli_messages.append(_text_message("user", f"<user_message>{text}</user_message>"))
     cli_messages.append(_text_message("user", _CLI_HELPER_MESSAGE))
-    cli_messages.append(_text_message("user", _CLI_REMINDER_MESSAGE, cache_control=True))
     return cli_messages
 
 

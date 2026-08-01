@@ -143,7 +143,12 @@ class OpenAICompatTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["messages"][0]["role"], "system")
-        self.assertEqual(payload["messages"][1]["role"], "user")
+        self.assertEqual(payload["messages"][1]["role"], "system")
+        self.assertEqual(payload["messages"][2]["role"], "user")
+        self.assertIn(
+            "<user_message>hello</user_message>",
+            payload["messages"][2]["content"][0]["text"],
+        )
         self.assertEqual(body["messages"][0]["role"], "developer")
 
     def test_build_upstream_payload_filters_unknown_request_fields(self) -> None:
