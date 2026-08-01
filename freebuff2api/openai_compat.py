@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from datetime import date
@@ -58,15 +57,6 @@ def _load_hermes_system_prompt() -> str:
             "You are helpful, knowledgeable, and direct."
         )
     return prompt
-
-
-def _load_cli_tools() -> list[dict[str, Any]]:
-    path = _REFERENCE_DIR / "buffy_tools.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (OSError, ValueError):
-        return []
 
 
 _UPSTREAM_CHAT_KEYS = frozenset(
@@ -175,10 +165,10 @@ def build_upstream_payload(
         "client_id": client_id,
         "cost_mode": "free",
     }
-    tools = _load_cli_tools()
-    if tools:
-        payload["tools"] = tools
-        payload.setdefault("tool_choice", "auto")
+    # NOTE: do NOT inject the Freebuff coding-agent toolset here. The upstream
+    # fingerprint only requires the Buffy system prompt at messages[0]; the
+    # client's own tools (already copied from body via _UPSTREAM_CHAT_KEYS)
+    # must pass through untouched so downstream agents can execute them.
     return payload
 
 

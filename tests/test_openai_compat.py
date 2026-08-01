@@ -175,6 +175,61 @@ class OpenAICompatTests(unittest.TestCase):
         self.assertEqual(payload["provider"], {"data_collection": "deny"})
         self.assertEqual(payload["codebuff_metadata"]["cost_mode"], "free")
 
+    def test_build_upstream_payload_does_not_inject_freebuff_tools(self) -> None:
+        payload = build_upstream_payload(
+            {
+                "model": "deepseek/deepseek-v4-flash",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            session=FreebuffSession(
+                instance_id="instance-1",
+                model="deepseek/deepseek-v4-flash",
+            ),
+            run_id="run-1",
+            client_id="client-1",
+        )
+
+        # Without client tools, the upstream payload must NOT carry the
+        # Freebuff coding-agent toolset or a forced tool_choice.
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("tool_choice", payload)
+
+    def test_build_upstream_payload_passes_client_tools_through(self) -> None:
+        client_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get current weather for a city",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }
+        ]
+        payload = build_upstream_payload(
+            {
+                "model": "deepseek/deepseek-v4-flash",
+                "messages": [{"role": "user", "content": "weather?"}],
+                "tools": client_tools,
+                "tool_choice": "auto",
+            },
+            session=FreebuffSession(
+                instance_id="instance-1",
+                model="deepseek/deepseek-v4-flash",
+            ),
+            run_id="run-1",
+            client_id="client-1",
+        )
+
+        self.assertEqual(payload["tools"], client_tools)
+        self.assertEqual(payload["tool_choice"], "auto")
+        names = {t["function"]["name"] for t in payload["tools"]}
+        self.assertNotIn("basher", names)
+        self.assertNotIn("spawn_agents", names)
+
     def test_accumulator_keeps_reasoning_content_separate(self) -> None:
         accumulator = CompletionAccumulator("deepseek/deepseek-v4-flash")
 
