@@ -19,10 +19,10 @@ logger = logging.getLogger("freebuff2api.codebuff")
 
 CODEBUFF_ACCEPT_ENCODING = "gzip, deflate"
 CODEBUFF_JSON_USER_AGENT = "Bun/1.3.11"
-FREEBUFF_CLI_USER_AGENT = "Freebuff-CLI/0.0.105"
+FREEBUFF_CLI_USER_AGENT = "Freebuff-CLI/0.0.135"
 CHAT_COMPLETIONS_USER_AGENT = (
     "ai-sdk/openai-compatible/0.0.0-test/codebuff "
-    "ai-sdk/provider-utils/3.0.20 runtime/browser"
+    "ai-sdk/provider-utils/3.0.25 runtime/browser"
 )
 
 
@@ -82,6 +82,8 @@ class CodebuffClient:
         )
         self._agents_validated = False
         self._validate_lock = asyncio.Lock()
+        self._user_id: str | None = None
+        self._user_id_lock = asyncio.Lock()
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -93,6 +95,7 @@ class CodebuffClient:
         user_agent: str = CODEBUFF_JSON_USER_AGENT,
         require_auth: bool = True,
         extra: dict[str, str] | None = None,
+        with_user_id: bool = False,
     ) -> dict[str, str]:
         if require_auth and not self.settings.codebuff_token:
             raise CodebuffError("FREEBUFF_TOKEN or CODEBUFF_TOKEN is required", 500)
@@ -106,6 +109,8 @@ class CodebuffClient:
         }
         if require_auth:
             headers["Authorization"] = f"Bearer {self.settings.codebuff_token}"
+        if with_user_id and self._user_id:
+            headers["x-freebuff-acting-user-id"] = self._user_id
         if json_body:
             headers["Content-Type"] = "application/json"
         if extra:
@@ -190,6 +195,39 @@ class CodebuffClient:
             "/api/healthz",
             headers=self._headers(require_auth=False),
         )
+
+    async def resolve_user_id(self) -> str | None:
+        """Resolve the acting user id from /api/v1/me (CLI requirement).
+
+        The upstream freebuff API now rejects free-mode chat requests that do
+        not carry the x-freebuff-acting-user-id header, which the CLI obtains
+        from GET /api/v1/me?fields=id,email.
+        """
+        async with self._user_id_lock:
+            if self._user_id is not None:
+                return self._user_id
+            try:
+                data = await self._json(
+                    "GET",
+                    "/api/v1/me?fields=id,email",
+                    headers=self._headers(require_auth=True),
+                )
+                user_id = data.get("id")
+                if user_id:
+                    self._user_id = str(user_id)
+                    logger.info("resolved freebuff acting user id=%s", self._user_id)
+                else:
+                    logger.warning(
+                        "freebuff /api/v1/me returned no id: %s",
+                        render_debug(data, self.settings.log_body_chars),
+                    )
+            except CodebuffError as error:
+                logger.warning(
+                    "failed to resolve freebuff acting user id: %s",
+                    error,
+                    exc_info=self.settings.debug,
+                )
+            return self._user_id
 
     async def get_session(self, instance_id: str | None = None) -> dict[str, Any]:
         headers_extra = {}
@@ -392,6 +430,7 @@ class CodebuffClient:
         agent_id: str,
         ancestor_run_ids: list[str] | None = None,
     ) -> str:
+        await self.resolve_user_id()
         data = await self._json(
             "POST",
             "/api/v1/agent-runs",
@@ -400,6 +439,7 @@ class CodebuffClient:
                 "agentId": agent_id,
                 "ancestorRunIds": ancestor_run_ids or [],
             },
+            headers=self._headers(json_body=True, with_user_id=True),
         )
         run_id = data.get("runId")
         if not run_id:
@@ -421,6 +461,7 @@ class CodebuffClient:
         start_time: str,
         child_run_ids: list[str] | None = None,
     ) -> None:
+        await self.resolve_user_id()
         await self._json(
             "POST",
             f"/api/v1/agent-runs/{run_id}/steps",
@@ -432,6 +473,7 @@ class CodebuffClient:
                 "status": "completed",
                 "startTime": start_time,
             },
+            headers=self._headers(json_body=True, with_user_id=True),
         )
         logger.info(
             "agent run step recorded run_id=%s step=%s message_id=%s children=%s",
@@ -442,6 +484,7 @@ class CodebuffClient:
         )
 
     async def finish_run(self, run_id: str, *, total_steps: int) -> None:
+        await self.resolve_user_id()
         await self._json(
             "POST",
             "/api/v1/agent-runs",
@@ -453,14 +496,17 @@ class CodebuffClient:
                 "directCredits": 0,
                 "totalCredits": 0,
             },
+            headers=self._headers(json_body=True, with_user_id=True),
         )
         logger.info("agent run finished run_id=%s total_steps=%s", run_id, total_steps)
 
     async def chat_events(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         url = f"{self.settings.codebuff_api_url}/api/v1/chat/completions"
+        await self.resolve_user_id()
         request_headers = self._headers(
             json_body=True,
             user_agent=CHAT_COMPLETIONS_USER_AGENT,
+            with_user_id=True,
         )
         try:
             async with self._client.stream(

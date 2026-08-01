@@ -1,11 +1,57 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
+from datetime import date
+from pathlib import Path
 from typing import Any
 
 from .codebuff import FreebuffSession
 from .models import resolve_model
+
+_REFERENCE_DIR = Path(__file__).resolve().parent
+
+_CLI_HELPER_MESSAGE = (
+    "Act as a helpful assistant and freely respond to the user's request however would be most "
+    "helpful to the user. Use your judgement to orchestrate the completion of the user's request "
+    "using your specialized sub-agents and tools as needed. Take your time and be comprehensive. "
+    "Don't surprise the user. For example, don't modify files if the user has not asked you to do "
+    "so at least implicitly."
+)
+
+_CLI_REMINDER_MESSAGE = (
+    "<system_reminder>You must spawn a code-reviewer-deepseek-flash to review any code changes "
+    "after you have implemented the changes and in parallel with typechecking or testing.\n"
+    "At the end of your turn, you must use the suggest_followups tool to suggest around 3 next "
+    "steps the user might want to take even if the user just asks a question.</system_reminder>"
+)
+
+
+def _load_buffy_system_prompt() -> str:
+    path = _REFERENCE_DIR / "buffy_system_prompt.txt"
+    try:
+        prompt = path.read_text(encoding="utf-8")
+    except OSError:
+        return "You are Buffy, the strategic coding assistant. You are the AI agent behind the product, Freebuff, a tool where users can chat with you to code with AI for free."
+    today = date.today().strftime("%B %-d, %Y") if hasattr(date.today(), "strftime") else date.today().isoformat()
+    try:
+        today = date.today().strftime("%B %-d, %Y")
+    except ValueError:  # %-d is not portable on Windows
+        today = date.today().strftime("%B %d, %Y")
+    import re
+
+    prompt = re.sub(r"Current date: [^\n]+", f"Current date: {today}.", prompt, count=1)
+    return prompt
+
+
+def _load_cli_tools() -> list[dict[str, Any]]:
+    path = _REFERENCE_DIR / "buffy_tools.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
 
 
 _UPSTREAM_CHAT_KEYS = frozenset(
@@ -80,6 +126,13 @@ def normalize_chat_messages(messages: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _text_message(role: str, text: str, *, cache_control: bool = False) -> dict[str, Any]:
+    item: dict[str, Any] = {"role": role, "content": [{"type": "text", "text": text}]}
+    if cache_control:
+        item["cache_control"] = {"type": "ephemeral"}
+    return item
+
+
 def build_upstream_payload(
     body: dict[str, Any],
     *,
@@ -95,7 +148,7 @@ def build_upstream_payload(
         if key in body and body[key] is not None
     }
     payload["model"] = upstream_model_id or model_id(body.get("model"))
-    payload["messages"] = normalize_chat_messages(body.get("messages"))
+    payload["messages"] = _build_cli_messages(body.get("messages"))
     payload["stream"] = True
     payload.setdefault("stop", ['"cb_easp"'])
 
@@ -107,7 +160,56 @@ def build_upstream_payload(
         "client_id": client_id,
         "cost_mode": "free",
     }
+    tools = _load_cli_tools()
+    if tools:
+        payload["tools"] = tools
+        payload.setdefault("tool_choice", "auto")
     return payload
+
+
+def _build_cli_messages(messages: Any) -> list[dict[str, Any]]:
+    """Build the message array the way the Freebuff CLI does.
+
+    The CLI sends:
+      1. the full "You are Buffy..." system prompt (with current date),
+      2. each user message wrapped in <user_message>...</user_message>,
+      3. a fixed "Act as a helpful assistant..." user instruction,
+      4. a fixed <system_reminder> user message.
+    The upstream now fingerprints requests that omit the CLI's system prompt
+    and rejects them with 403 free_mode_cli_required.
+    """
+    normalized = normalize_chat_messages(messages)
+    user_turns = [
+        item
+        for item in normalized
+        if item.get("role") == "user"
+        and not str(item.get("content") or "").startswith("<user_message>")
+    ]
+
+    cli_messages: list[dict[str, Any]] = [
+        _text_message("system", _load_buffy_system_prompt())
+    ]
+    for item in user_turns:
+        text = _message_text(item.get("content"))
+        cli_messages.append(_text_message("user", f"<user_message>{text}</user_message>"))
+    cli_messages.append(_text_message("user", _CLI_HELPER_MESSAGE))
+    cli_messages.append(_text_message("user", _CLI_REMINDER_MESSAGE, cache_control=True))
+    return cli_messages
+
+
+def _message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            str(part.get("text"))
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        return "\n".join(parts)
+    if isinstance(content, dict) and isinstance(content.get("text"), str):
+        return content["text"]
+    return str(content or "")
 
 
 def sanitize_stream_chunk(chunk: dict[str, Any]) -> dict[str, Any] | None:

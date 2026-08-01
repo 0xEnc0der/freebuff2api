@@ -275,8 +275,12 @@ class CodebuffClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_events_uses_har_fingerprint_headers(self) -> None:
         captured_headers = {}
+        me_headers = {}
 
         def capture_headers(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/v1/me":
+                me_headers.update(dict(request.headers))
+                return httpx.Response(200, json={"id": "user-123", "email": "u@example.com"})
             captured_headers.update(dict(request.headers))
             return httpx.Response(200, content=b"data: [DONE]\n\n")
 
@@ -299,6 +303,7 @@ class CodebuffClientTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.aclose()
 
+        self.assertEqual(me_headers["authorization"], "Bearer token")
         self.assertEqual(captured_headers["authorization"], "Bearer token")
         self.assertEqual(captured_headers["content-type"], "application/json")
         self.assertEqual(captured_headers["user-agent"], CHAT_COMPLETIONS_USER_AGENT)
@@ -306,6 +311,10 @@ class CodebuffClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured_headers["accept"], "*/*")
         self.assertEqual(captured_headers["host"], "www.codebuff.com")
         self.assertEqual(captured_headers["accept-encoding"], CODEBUFF_ACCEPT_ENCODING)
+        self.assertEqual(
+            captured_headers["x-freebuff-acting-user-id"],
+            "user-123",
+        )
 
 
 if __name__ == "__main__":
